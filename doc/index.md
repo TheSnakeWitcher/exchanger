@@ -14,18 +14,6 @@ uint256 feeFactor
 constructor(uint256 _feeFactor) public
 ```
 
-### listItem
-
-```solidity
-function listItem(uint256 id, uint64 deadline, uint256 amount) public
-```
-
-### listItem
-
-```solidity
-function listItem(uint256 id, uint64 deadline, uint256 amount, address token) public
-```
-
 ### buyItem
 
 ```solidity
@@ -56,6 +44,18 @@ Remove the listing for `id`
 | ---- | ---- | ----------- |
 | id | uint256 | - identifier of the token being delisted Requirements: - `id` must exist and be listed for sale - Caller must be owner, authorised operators or approved address of the token - Must emit an {UpdateListing} event |
 
+### complete
+
+```solidity
+function complete(uint256 id) external
+```
+
+### withdraw
+
+```solidity
+function withdraw(uint256 id) external
+```
+
 ### setFeeFactor
 
 ```solidity
@@ -82,6 +82,18 @@ Return the listing for `id`
 | ---- | ---- | ----------- |
 | [0] | struct IExchanger.Order | the specified listing (deadline, price, token) |
 
+### listItem
+
+```solidity
+function listItem(uint256 id, uint64 deadline, uint256 amount) public
+```
+
+### listItem
+
+```solidity
+function listItem(uint256 id, uint64 deadline, uint256 amount, address token) public
+```
+
 ## IExchanger
 
 ### OrderState
@@ -90,7 +102,8 @@ Return the listing for `id`
 enum OrderState {
   NonExistent,
   Initialized,
-  Paid
+  Paid,
+  Completed
 }
 ```
 
@@ -148,6 +161,14 @@ Emitted when a item is being purchased
 | to | address | - address of who is buying the token |
 | amount | uint256 | - the price the token is being sold for |
 | token | address | - contract addresses of supported token or zero address(for ETH) |
+
+### OrderCompleted
+
+```solidity
+event OrderCompleted(uint256 id)
+```
+
+Emitted when a item is being purchased
 
 ### OrderDeleted
 
