@@ -13,6 +13,7 @@ describe("Exchanger", function() {
     const feeFactor = 5 ;
     const amount = 10e4 ;
     const payAmount = 2 * amount ;
+    const fee = ( amount * feeFactor / 10000 ) / 2 ;
     const orderId = 0 ;
     const orderId2 = 1 ;
 
@@ -51,50 +52,7 @@ describe("Exchanger", function() {
 
     })
 
-    describe("listItem()", function() {
-
-        it("create order with specified parameters", async () => {
-            await exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
-            const order = await exchanger.getListing(orderId) ;
-            expect(order.seller).to.equal(await user.getAddress())
-        })
-
-        it("create order with specified parameters including token", async () => {
-            await exchanger.connect(user)["listItem(uint256,uint64,uint256,address)"](orderId, deadline, amount, await token.getAddress())
-            const order = await exchanger.getListing(orderId) ;
-            expect(order.seller).to.equal(await user.getAddress())
-        })
-
-        it("emit OrderCreated event with specified parameters", async () => {
-            await expect(exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount))
-                .to.emit(exchanger, events.OrderCreated)
-                .withArgs(orderId, await user.getAddress(), deadline, amount, ethers.ZeroAddress)
-        })
-
-        it("fails if order already exists", async () => {
-            await exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
-            await expect(
-                exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
-            ).to.revertedWithCustomError(exchanger, errors.InvalidOrderData)
-        })
-
-        it("fails if deadline is lower that current block timestamp", async () => {
-            await expect(
-                exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, 0 , amount)
-            ).to.revertedWithCustomError(exchanger, errors.InvalidOrderData)
-        })
-
-        it("fails if amount is lower 0", async () => {
-            await expect(
-                exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, 0)
-            ).to.revertedWithCustomError(exchanger, errors.InvalidOrderData)
-        })
-
-    })
-
     describe("buyItem()", function() {
-
-        const fee : number = ( amount * feeFactor / 10000 ) ;
 
         describe("native coin order", () => {
 
@@ -104,10 +62,10 @@ describe("Exchanger", function() {
 
             it("change balances", async () => {
                 await expect(
-                    exchanger.connect(user2).buyItem(orderId, { value: payAmount })
-                ).to.changeEtherBalances(
-                    [await user.getAddress(), await owner.getAddress()],
-                    [amount, fee]
+                    exchanger.connect(user2).buyItem(orderId, { value: amount + fee })
+                ).to.changeEtherBalance(
+                    await exchanger.getAddress(),
+                    amount + fee
                 )
             })
 
@@ -121,6 +79,12 @@ describe("Exchanger", function() {
                         amount,
                         ethers.ZeroAddress
                     )
+            })
+
+            it("fails if payment is insufficient", async () => {
+                await expect(exchanger.connect(user2).buyItem(orderId, { value: amount / 2 }))
+                    .to.revertedWithCustomError(exchanger, errors.AddressInsufficientBalance)
+                    .withArgs(await user2.getAddress() )
             })
 
             it("fails if order doesn't exists", async () => {
@@ -156,10 +120,10 @@ describe("Exchanger", function() {
 
                 await expect(
                     exchanger.connect(user2).buyItem(orderId, { value: payAmount })
-                ).to.changeTokenBalances(
+                ).to.changeTokenBalance(
                     token,
-                    [await user.getAddress(), await owner.getAddress()],
-                    [amount, fee]
+                    await exchanger.getAddress(),
+                    amount + fee
                 )
             })
 
@@ -175,7 +139,15 @@ describe("Exchanger", function() {
                     )
             })
 
+            it("fails if payment is insufficient", async () => {
+                const balance = await token.balanceOf(await user2.getAddress()) 
+                await token.connect(user2).transfer(await owner.getAddress() , balance)
+                await expect(exchanger.connect(user2).buyItem(orderId))
+                    .to.be.reverted
+            })
+
             it("fails if order doesn't exists", async () => {
+
                 await expect(exchanger.connect(user2).buyItem(orderId2))
                     .to.revertedWithCustomError(exchanger, errors.InvalidOrderState)
             })
@@ -224,6 +196,112 @@ describe("Exchanger", function() {
 
     })
 
+    describe("complete()", () => {
+
+        beforeEach( async () => {
+            await exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
+            await exchanger.connect(user2).buyItem(orderId, { value: amount + fee })
+        })
+
+        it("emit OrderCompleted event with specified args", async () => {
+            await expect(exchanger.complete(orderId))
+                .to.emit(exchanger, events.OrderCompleted)
+                .withArgs(orderId)
+        })
+
+        it("change order state", async () => {
+            await exchanger.complete(orderId)
+            const order = await exchanger.getListing(orderId)
+            expect(order.state).to.equal(3) // 3 corresponds to IExchanger.Completed
+        })
+
+        it("fails when is called by user", async () => {
+            await expect(exchanger.connect(user).complete(orderId))
+                .to.revertedWithCustomError(exchanger, errors.OwnableUnauthorizedAccount)
+                .withArgs(await user.getAddress())
+        })
+
+        it("fails when order isn't paid", async () => {
+            await exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId2, deadline, amount)
+            await expect(exchanger.connect(owner).complete(orderId2))
+                .to.revertedWithCustomError(exchanger, errors.InvalidOrderState);
+        })
+
+    })
+
+    describe("withdraw()", () => {
+
+        describe("native coin withdraw()", () => {
+
+            beforeEach(async () => {
+                await exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
+                await exchanger.connect(user2).buyItem(orderId, { value: amount + fee })
+                await exchanger.connect(owner).complete(orderId)
+            })
+
+            it("sends corresponding funds", async () => {
+                await expect(exchanger.connect(user).withdraw(orderId))
+                    .to.changeEtherBalances(
+                        [await owner.getAddress(), await user.getAddress()] ,
+                        [fee, amount]
+                    )
+            })
+
+            it("fails when the user that withdrawn is not the seller of the order", async () => {
+                await expect(exchanger.connect(user2).withdraw(orderId))
+                    .to.revertedWithCustomError(exchanger, errors.InvalidOrderSeller)
+            })
+
+        })
+
+        describe("erc20 withdraw()", () => {
+
+            beforeEach(async () => {
+                await exchanger.connect(user)
+                    ["listItem(uint256,uint64,uint256,address)"]
+                    (orderId, deadline, amount, await token.getAddress())
+
+                await token.connect(owner).transfer(await user2.getAddress(), payAmount )
+                await token.connect(user2).approve(await exchanger.getAddress(), amount + fee)
+                await exchanger.connect(user2).buyItem(orderId)
+                await exchanger.connect(owner).complete(orderId)
+            })
+
+            it("sends corresponding funds", async () => {
+                await expect(exchanger.connect(user).withdraw(orderId))
+                    .to.changeTokenBalances(
+                        token,
+                        [await user.getAddress(), await owner.getAddress()],
+                        [amount, fee]
+                )
+            })
+
+            it("fails when the user that withdrawn is not the seller of the order", async () => {
+                await expect(exchanger.connect(user2).withdraw(orderId))
+                    .to.revertedWithCustomError(exchanger, errors.InvalidOrderSeller)
+            })
+
+        })
+
+    })
+
+    describe("setFeeFactor()", function() {
+
+        const newFeeFactor = feeFactor + 5 ;
+
+        it("set specified fee", async () => {
+            await exchanger.connect(owner).setFeeFactor(newFeeFactor)
+            expect(await exchanger.feeFactor()).to.equal(newFeeFactor)
+        })
+
+        it("fails when is called by user", async () => {
+            await expect(exchanger.connect(user).setFeeFactor(newFeeFactor))
+                .to.revertedWithCustomError(exchanger, errors.OwnableUnauthorizedAccount)
+                .withArgs(await user.getAddress())
+        })
+
+    })
+
     describe("getListing()", function() {
 
         let order : IExchanger.OrderStructOutput 
@@ -247,19 +325,43 @@ describe("Exchanger", function() {
 
     })
 
-    describe("setFeeFactor()", function() {
+    describe("listItem()", function() {
 
-        const newFeeFactor = feeFactor + 5 ;
-
-        it("set specified fee", async () => {
-            await exchanger.connect(owner).setFeeFactor(newFeeFactor)
-            expect(await exchanger.feeFactor()).to.equal(newFeeFactor)
+        it("create order with specified parameters", async () => {
+            await exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
+            const order = await exchanger.getListing(orderId) ;
+            expect(order.seller).to.equal(await user.getAddress())
         })
 
-        it("fails when is called by user", async () => {
-            await expect(exchanger.connect(user).setFeeFactor(newFeeFactor))
-                .to.revertedWithCustomError(exchanger, errors.OwnableUnauthorizedAccount)
-                .withArgs(await user.getAddress())
+        it("create order with specified parameters including token", async () => {
+            await exchanger.connect(user)["listItem(uint256,uint64,uint256,address)"](orderId, deadline, amount, await token.getAddress())
+            const order = await exchanger.getListing(orderId) ;
+            expect(order.seller).to.equal(await user.getAddress())
+        })
+
+        it("emit OrderCreated event with specified parameters", async () => {
+            await expect(exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount))
+                .to.emit(exchanger, events.OrderCreated)
+                .withArgs(orderId, await user.getAddress(), deadline, amount, ethers.ZeroAddress)
+        })
+
+        it("fails if order already exists", async () => {
+            await exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
+            await expect(
+                exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, amount)
+            ).to.revertedWithCustomError(exchanger, errors.InvalidOrderData)
+        })
+
+        it("fails if deadline is lower that current block timestamp", async () => {
+            await expect(
+                exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, 0 , amount)
+            ).to.revertedWithCustomError(exchanger, errors.InvalidOrderData)
+        })
+
+        it("fails if amount is lower 0", async () => {
+            await expect(
+                exchanger.connect(user)["listItem(uint256,uint64,uint256)"](orderId, deadline, 0)
+            ).to.revertedWithCustomError(exchanger, errors.InvalidOrderData)
         })
 
     })
