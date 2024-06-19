@@ -91,7 +91,7 @@ contract Exchanger is Ownable, ReentrancyGuard, IExchanger {
     }
 
     function _executePayments(IExchanger.Order memory order) private {
-        uint256 fee = getFeeOf(order) ;
+        uint256 fee = _getFeeOf(order) ;
         if (order.token == address(0)) {
             Address.sendValue(payable(owner()), fee) ;
             Address.sendValue(payable(order.seller), order.amount) ;
@@ -101,18 +101,9 @@ contract Exchanger is Ownable, ReentrancyGuard, IExchanger {
         }
     }
 
-    function getFeeOf(IExchanger.Order memory order) public view returns (uint256) {
+    function _getFeeOf(IExchanger.Order memory order) private view returns (uint256) {
         return (order.amount * feeFactor / 10000) ;
     }
-
-    // function _chargeFee(IExchanger.Order memory order) private {
-    //     uint256 fee = getFeeOf(order) ;
-    //     if (order.token == address(0)) {
-    //         Address.sendValue(payable(owner()), fee) ;
-    //     } else {
-    //         IERC20(order.token).transferFrom(_msgSender(), owner(), fee) ;
-    //     }
-    // }
 
     function _setFeeFactor(uint256 _feeFactor) private {
         feeFactor =  _feeFactor ;
