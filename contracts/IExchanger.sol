@@ -7,7 +7,8 @@ interface IExchanger {
     enum OrderState {
         NonExistent,
         Initialized,
-        Paid
+        Paid,
+        Completed
     }
 
     /**
@@ -57,6 +58,9 @@ interface IExchanger {
         uint256 amount,
         address token
     );
+
+    /// @notice Emitted when a item is being purchased
+    event OrderCompleted(uint256 indexed id);
 
     /// @notice Emitted when a item is being purchased
     event OrderDeleted(uint256 indexed id); 

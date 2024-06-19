@@ -24,44 +24,23 @@ contract Exchanger is Ownable, ReentrancyGuard, IExchanger {
         _setFeeFactor(_feeFactor) ;
     }
 
-    function listItem(uint256 id, uint64 deadline, uint256 amount) public {
-        listItem(id, deadline, amount, address(0)) ;
-    }
-
-    function listItem(uint256 id, uint64 deadline, uint256 amount, address token) public {
-        require(
-            _orders[id].state == IExchanger.OrderState.NonExistent &&
-            deadline > block.timestamp &&
-            amount > 0,
-            IExchanger.InvalidOrderData()
-        );
-
-        IExchanger.Order memory order = IExchanger.Order({
-            seller: _msgSender(),
-            deadline: deadline,
-            amount: amount,
-            token: token,
-            state: IExchanger.OrderState.Initialized
-        }) ;
-        _orders[id] = order ;
-        emit IExchanger.OrderCreated(id, _msgSender(), deadline, amount, token) ;
-    }
-
     function buyItem(uint256 id) external payable nonReentrant {
         IExchanger.Order memory order = _orders[id] ;
         require(
             order.state == IExchanger.OrderState.Initialized &&
             block.timestamp <=  order.deadline,
             IExchanger.InvalidOrderState()
-        ) ;
-        require(
-            order.seller != _msgSender() ,
-            IExchanger.InvalidOrderBuyer()
-        ) ;
+        );
 
-        _executePayments(order) ;
+        address buyer = _msgSender() ;
+        require(
+            order.seller !=  buyer,
+            IExchanger.InvalidOrderBuyer()
+        );
+
+        _chargeFees(order) ;
         _orders[id].state = IExchanger.OrderState.Paid ;
-        emit IExchanger.OrderPurchased(id, order.seller, _msgSender(), order.amount, order.token) ;
+        emit IExchanger.OrderPurchased(id, order.seller, buyer, order.amount, order.token) ;
     }
 
     function delistItem(uint256 id) external {
@@ -81,6 +60,26 @@ contract Exchanger is Ownable, ReentrancyGuard, IExchanger {
         emit IExchanger.OrderDeleted(id) ;
     }
 
+    function complete(uint256 id) external onlyOwner {
+        require(_orders[id].state == IExchanger.OrderState.Paid, IExchanger.InvalidOrderState() );
+        _orders[id].state =  IExchanger.OrderState.Completed ;
+        emit IExchanger.OrderCompleted(id) ;
+    }
+
+    function withdraw(uint256 id) external {
+        IExchanger.Order memory order = _orders[id] ;
+        require(order.seller == _msgSender(), IExchanger.InvalidOrderSeller() );
+        require(order.state == IExchanger.OrderState.Completed, IExchanger.InvalidOrderState() );
+
+        uint256 fee = _getFeeOf(order.amount) ;
+        if (order.token == address(0)) {
+            Address.sendValue(payable(owner()), fee) ;
+            Address.sendValue(payable(order.seller), order.amount) ;
+        } else {
+            IERC20(order.token).transfer(owner(), fee) ;
+            IERC20(order.token).transfer(order.seller, order.amount) ;
+        }
+    }
 
     function setFeeFactor(uint256 _feeNumerator) external onlyOwner {
         _setFeeFactor(_feeNumerator) ;
@@ -90,23 +89,45 @@ contract Exchanger is Ownable, ReentrancyGuard, IExchanger {
         return _orders[id] ;
     }
 
-    function _executePayments(IExchanger.Order memory order) private {
-        uint256 fee = _getFeeOf(order) ;
-        if (order.token == address(0)) {
-            Address.sendValue(payable(owner()), fee) ;
-            Address.sendValue(payable(order.seller), order.amount) ;
-        } else {
-            IERC20(order.token).transferFrom(_msgSender(), owner(), fee) ;
-            IERC20(order.token).transferFrom(_msgSender(), order.seller, order.amount) ;
-        }
+    function listItem(uint256 id, uint64 deadline, uint256 amount) public {
+        listItem(id, deadline, amount, address(0)) ;
     }
 
-    function _getFeeOf(IExchanger.Order memory order) private view returns (uint256) {
-        return (order.amount * feeFactor / 10000) ;
+    function listItem(uint256 id, uint64 deadline, uint256 amount, address token) public {
+        require(
+            _orders[id].state == IExchanger.OrderState.NonExistent &&
+            deadline > block.timestamp &&
+            amount > 0,
+            IExchanger.InvalidOrderData()
+        );
+
+        IExchanger.Order memory order = IExchanger.Order({
+            seller: _msgSender(),
+            deadline: deadline,
+            amount: amount,
+            token: token,
+            state: IExchanger.OrderState.Initialized
+        }) ;
+
+        _orders[id] = order ;
+        emit IExchanger.OrderCreated(id, _msgSender(), deadline, amount, token) ;
+    }
+
+    function _chargeFees(IExchanger.Order memory order) private {
+        uint256 payment = order.amount + _getFeeOf(order.amount) ;
+        if ( order.token != address(0)) {
+            IERC20(order.token).transferFrom(_msgSender(), address(this), payment) ;
+        } else {
+            require(msg.value >= payment, Address.AddressInsufficientBalance(_msgSender())) ;
+        }
     }
 
     function _setFeeFactor(uint256 _feeFactor) private {
         feeFactor =  _feeFactor ;
+    }
+
+    function _getFeeOf(uint256 amount) private view returns (uint256) {
+        return (amount * feeFactor / 10000) / 2 ;
     }
 
 }
