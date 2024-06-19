@@ -11,10 +11,17 @@ buyer.
 
 These assume that the company who own the contract(protocol owner) handles also the delivery of
 the exchanged item(logistics), so if during the process is determined that the order isn't
-trustworty(maybe the item doesn't match its description) the order may be deleted by protcol
+trustworty(maybe the item doesn't match its description) the order may be deleted by protocol
 owner, additionally the seller can cancel the order to.
 
 Every order needs an unique `id` which should be generad offchain to avoid more on-chain computations
 and optionally a seller may provide a `deadline` for time limited orders.
 
-A reference documentation can be found [here](https://github.com/TheSnakeWitcher/exchanger/blob/main/doc/index.md)
+A reference documentation can be found [here](https://github.com/TheSnakeWitcher/exchanger/blob/main/doc/index.md). To to run the test
+suite and generate a coverage report
+
+```sh
+git clone https://github.com/TheSnakeWitcher/exchanger
+pnpm install
+pnpm hardhat coverage
+```
